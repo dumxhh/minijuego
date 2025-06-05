@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>¡Esquiva las pelotas broder!</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #87b2e7;
+      font-family: Arial, sans-serif;
+    }
+
+    .pelota {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      position: absolute;
+    }
+
+    #azul {
+      background-color: blue;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .roja {
+      background-color: red;
+    }
+
+    .estrella {
+      width: 15px;
+      height: 15px;
+      background-color: gold;
+      position: absolute;
+      clip-path: polygon(
+        50% 0%,
+        61% 35%,
+        98% 35%,
+        68% 57%,
+        79% 91%,
+        50% 70%,
+        21% 91%,
+        32% 57%,
+        2% 35%,
+        39% 35%
+      );
+      animation: desaparecer 1s ease-out forwards;
+    }
+
+    @keyframes desaparecer {
+      0% { opacity: 1; transform: scale(1); }
+      100% { opacity: 0; transform: scale(0.5); }
+    }
+
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: #3498db;
+      color: white;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+      z-index: 2;
+    }
+
+    #barraProgreso {
+      width: 100%;
+      height: 10px;
+      background-color: #2980b9;
+      border-radius: 5px;
+      margin-top: 10px;
+    }
+
+    #barraLlena {
+      width: 0%;
+      height: 100%;
+      background-color: #5dade2;
+      border-radius: 5px;
+    }
+
+    #webcamContainer {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 200px;
+      height: 200px;
+      border: 2px solid #3498db;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    #webcam {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* Invierte la cámara horizontalmente */
+    }
+
+    #canvas {
+      display: none;
+    }
+
+    #errorMessage {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background-color: rgba(255, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      display: none;
+      z-index: 3;
+    }
+  </style>
+</head>
+<body>
+  <div id="azul" class="pelota"></div>
+
+  <div id="hud">
+    <div id="puntos">Puntos: 0</div>
+    <div id="nivel">Nivel: 1</div>
+    <div id="barraProgreso">
+      <div id="barraLlena"></div>
+    </div>
+  </div>
+
+  <div id="webcamContainer">
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="errorMessage"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script>
+    const pelotaAzul = document.getElementById("azul");
+    const body = document.body;
+    const videoElement = document.getElementById("webcam");
+    const canvasElement = document.getElementById("canvas");
+    const canvasCtx = canvasElement.getContext("2d");
+    const puntosLabel = document.getElementById("puntos");
+    const nivelLabel = document.getElementById("nivel");
+    const barraLlena = document.getElementById("barraLlena");
+    const errorMessage = document.getElementById("errorMessage");
+
+    let pelotasRojas = [];
+    const maxPelotas = 12;
+    let puntos = 0;
+    let nivel = 1;
+    let lastPointUpdate = performance.now(); // Track last point update time
+
+    // Inicializar MediaPipe Face Detection
+    const faceDetection = new FaceDetection({
+      locateFile: file =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`,
+    });
+
+    faceDetection.setOptions({
+      model: 'short',
+      minDetectionConfidence: 0.7,
+    });
+
+    faceDetection.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        try {
+          await faceDetection.send({ image: videoElement });
+        } catch (e) {
+          console.error("Error en faceDetection.send:", e);
+          showError("Error procesando el video. Intenta de nuevo.");
+        }
+      },
+      width: 200,
+      height: 200,
+    });
+
+    // Iniciar la cámara con manejo de errores
+    camera.start().catch(err => {
+      console.error("Error iniciando la cámara:", err);
+      showError("No se pudo acceder a la cámara. Verifica los permisos.");
+    });
+
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.style.display = "block";
+      setTimeout(() => {
+        errorMessage.style.display = "none";
+      }, 5000);
+    }
+
+    function onResults(results) {
+      if (results.detections && results.detections.length > 0) {
+        // Usar el punto clave de la nariz (índice 2 en keypoints)
+        const noseTip = results.detections[0].landmarks[2];
+        // Invertir la coordenada x para que coincida con la cámara espejada
+        const x = (1 - noseTip.x) * window.innerWidth;
+        const y = noseTip.y * window.innerHeight;
+        pelotaAzul.style.left = `${x - 25}px`;
+        pelotaAzul.style.top = `${y - 25}px`;
+        console.log(`Nariz detectada: x=${x}, y=${y}`);
+      } else {
+        console.log("No se detectó ninguna cara.");
+      }
+    }
+
+    function crearPelotaRoja(x, y, vx, vy) {
+      const div = document.createElement("div");
+      div.className = "pelota roja";
+      div.style.left = x + "px";
+      div.style.top = y + "px";
+      body.appendChild(div);
+      pelotasRojas.push({ div, vx, vy });
+    }
+
+    function crearEstrella(x, y) {
+      const estrella = document.createElement("div");
+      estrella.className = "estrella";
+      estrella.style.left = x + "px";
+      estrella.style.top = y + "px";
+      body.appendChild(estrella);
+      setTimeout(() => estrella.remove(), 1000);
+    }
+
+    function actualizarHUD() {
+      puntosLabel.textContent = `Puntos: ${Math.floor(puntos)}`;
+      nivel = Math.floor(puntos / 200) + 1;
+      nivelLabel.textContent = `Nivel: ${nivel}`;
+      barraLlena.style.width = `${(puntos % 200) / 2}%`;
+    }
+
+    function detectarColision(r1, r2) {
+      const a = r1.getBoundingClientRect();
+      const b = r2.getBoundingClientRect();
+      return !(
+        a.right < b.left ||
+        a.left > b.right ||
+        a.bottom < b.top ||
+        a.top > b.bottom
+      );
+    }
+
+    function loopJuego() {
+      const currentTime = performance.now();
+      // Incrementar puntos cada 1000ms (1 segundo)
+      if (currentTime - lastPointUpdate >= 2000) {
+        puntos += 1 + nivel * 0.5; // Incremento más lento: 1 punto + 0.5 por nivel
+        lastPointUpdate = currentTime;
+      }
+
+      for (const p of pelotasRojas) {
+        let x = parseInt(p.div.style.left);
+        let y = parseInt(p.div.style.top);
+
+        x += p.vx;
+        y += p.vy;
+
+        let reboto = false;
+
+        if (x <= 0 || x >= window.innerWidth - 50) {
+          p.vx *= -1;
+          reboto = true;
+        }
+
+        if (y <= 0 || y >= window.innerHeight - 50) {
+          p.vy *= -1;
+          reboto = true;
+        }
+
+        p.div.style.left = x + "px";
+        p.div.style.top = y + "px";
+
+        if (reboto && pelotasRojas.length < maxPelotas) {
+          const nuevoVX = (Math.random() > 0.5 ? 1 : -1) * (2 + nivel * 0.5);
+          const nuevoVY = (Math.random() > 0.5 ? 1 : -1) * (2 + nivel * 0.5);
+          crearPelotaRoja(x, y, nuevoVX, nuevoVY);
+        }
+
+        if (detectarColision(p.div, pelotaAzul)) {
+          alert(`¡Has perdido! Puntos: ${Math.floor(puntos)}`);
+          location.reload();
+          return;
+        }
+      }
+
+      crearEstrella(
+        Math.random() * (window.innerWidth - 15),
+        Math.random() * (window.innerHeight - 15)
+      );
+      actualizarHUD();
+      requestAnimationFrame(loopJuego);
+    }
+
+    // Iniciar juego
+    crearPelotaRoja(100, 100, 3, 3);
+    crearPelotaRoja(300, 200, -3, 2);
+    crearPelotaRoja(500, 150, 2, -3);
+    loopJuego();
+  </script>
+</body>
+</html>
